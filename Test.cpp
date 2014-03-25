@@ -15,26 +15,21 @@ struct Printer
 
 int main()
 {
-    typedef Table<int, char, const char*> TestTable;
+    typedef Table<int, char, const char*, std::string> TestTable;
     TestTable table;
 
-    auto updateRow = [&](TestTable::Index index, int v1, char v2, const char* v3) {
-        table.update(index, v1);
-        table.update(index, v2);
-        table.update(index, v3);
-    };
+    table.insert(0, '\0', std::string("a"), "b");
+    table.insert(0, '\0', std::string("c"), "d");
 
-    updateRow(table.insert(), 1, '2', "3");
-    updateRow(table.insert(), 4, '5', "6");
-    updateRow(table.insert(), 7, '8', "9");
+    table.select< Project<int, char, const char*, std::string> >(Printer());
 
-    std::vector<std::string> headers = table.headers();
-    for(auto name : headers) {
-        std::cout << name << "|";
+    {
+        table.select< Project<std::string> >([&](uint64_t, const std::string &value) {
+            if(!value.empty()) {
+                std::cout << value << std::endl;
+            }
+        });
     }
-    std::cout << std::endl;
-
-    table.select<Printer, int, char>(Printer());
 
     return 0;
 }

@@ -13,9 +13,16 @@
 #include <boost/mpl/inherit.hpp>
 #include <boost/mpl/inherit_linearly.hpp>
 #include <boost/mpl/for_each.hpp>
+#include <boost/mpl/size.hpp>
 #include <boost/mpl/placeholders.hpp>
 
 using namespace boost;
+
+template<class... Columns>
+struct Project
+{
+    typedef mpl::vector<Columns...> Projection;
+};
 
 template<typename... Columns>
 class Table
@@ -39,6 +46,20 @@ public:
     {
         Index index;
         Row row;
+
+        template<typename T>
+        T& get()
+        {
+            Column<T> &column = row;
+            return column.field;
+        }
+
+        template<typename T>
+        const T &get() const
+        {
+            const Column<T> &column = row;
+            return column.field;
+        }
 
         bool operator <(const TableEntry &rhs) const { return index < rhs.index; }
         bool operator==(const TableEntry &rhs) const { return index == rhs.index; }
@@ -64,12 +85,39 @@ public:
     struct Projector
     {
         const TableEntry &entry;
-        Func func;
+        Func &func;
 
         template<typename T>
         void operator()(Wrap<T>)
         {
-            func(entry.index, column<T>(entry.row));
+            func(entry.index, entry.get<T>());
+        }
+    };
+
+    struct EntryBuilder
+    {
+        TableEntry &entry;
+
+        template<class Arg>
+        void build(Arg arg)
+        {
+            entry.get<Arg>() = arg;
+        }
+
+        template<class Arg, class... Args>
+        void build(Arg arg, Args... args)
+        {
+            build(arg);
+            if(isEmpty<Args...>()) {
+                build(args...);
+            }
+        }
+
+        template<typename... Args>
+        static bool isEmpty()
+        {
+            typedef mpl::vector<Args...> ArgVector;
+            return mpl::size<ArgVector>::value > 0;
         }
     };
 
@@ -100,30 +148,46 @@ public:
         return entry.index;
     }
 
-    template<typename T>
-    bool select(Index index, T *value) const
+    template<class... Args>
+    Index insert(Args... args)
     {
-        TableEntry key;
-        key.index = index;
-        auto iter = std::lower_bound(table_.begin(), table_.end(), key);
-        if(iter == table_.end() || (iter->index != index)) {
-            return false;
-        } else {
-            *value = column<T>(iter->row);
-            return true;
+        TableEntry entry;
+        EntryBuilder builder{entry};
+        builder.build(args...);
+
+        entry.index = next_++;
+        table_.push_back(entry);
+        return entry.index;
+    }
+
+    template<typename Project_, typename Func>
+    void select(Func func) const
+    {
+        for(const auto &entry : table_) {
+            Projector<Func> projector{entry, func};
+            mpl::for_each<typename Project_::Projection, Wrap<mpl::placeholders::_1> >
+                    (std::ref(projector));
         }
     }
 
-    template<typename Func, typename... Projection>
-    void select(Func func) const
+    typename std::vector<TableEntry>::iterator begin()
     {
-        typedef mpl::vector<Projection...> ProjectionVector;
+        return table_.begin();
+    }
 
-        for(const auto &row : table_) {
-            Projector<Func> projector{row, func};
-            mpl::for_each<ProjectionVector, Wrap<mpl::placeholders::_1> >
-                    (std::ref(projector));
-        }
+    typename std::vector<TableEntry>::const_iterator begin() const
+    {
+        return table_.begin();
+    }
+
+    typename std::vector<TableEntry>::iterator end()
+    {
+        return table_.end();
+    }
+
+    typename std::vector<TableEntry>::const_iterator end() const
+    {
+        return table_.end();
     }
 
     template<typename T>
@@ -135,7 +199,7 @@ public:
         if(iter == table_.end() || (iter->index != index)) {
             return false;
         } else {
-            column<T>(iter->row) = value;
+            iter->get<T>() = value;
             return true;
         }
     }
@@ -151,18 +215,6 @@ public:
             table_.erase(iter);
             return true;
         }
-    }
-
-    template<typename T>
-    static T& column(Column<T>& t)
-    {
-        return t.field;
-    }
-
-    template<typename T>
-    static const T &column(const Column<T>& t)
-    {
-        return t.field;
     }
 
 private:
